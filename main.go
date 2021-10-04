@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -10,54 +11,65 @@ import (
 	"github.com/gosimple/slug"
 )
 
+var extensions = map[string]bool{
+	"":     false,
+	".mkv": true,
+	".avi": true,
+	".m4v": true,
+	".mp4": true,
+}
+
+var regex = `(?:^[A-Z])?(?:.*)(?:\/|\\\\?)([a-zA-Z ]?.*)(?:s|S|Season) ?([0-9]+) ?(?:e|E|Episode) ?([0-9]+)(?:.*)(?:\.)`
+
 func main() {
-	extensions := map[string]bool{
-		"":     false,
-		".mkv": true,
-		".avi": true,
-		".m4v": true,
-		".mp4": true,
+	var dir string
+	flag.StringVar(&dir, "d", "", "The path in which the recursive search of media takes place")
+	flag.Parse()
+
+	if dir == "" {
+		flag.PrintDefaults()
+		os.Exit(1)
 	}
 
-	dir, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if len(os.Args) == 2 {
-		dir = os.Args[1]
-	}
-
-	dir, err = filepath.Abs(dir)
+	dir, err := filepath.Abs(dir)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if extensions[filepath.Ext(path)] {
-			re := regexp.MustCompile(`(?:^[A-Z])?(?:.*)(?:\/|\\\\?)([a-zA-Z ]?.*)(?:s|S|Season) ?([0-9]+) ?(?:e|E|Episode) ?([0-9]+)(?:.*)(?:\.)`)
-			for _, loc := range re.FindAllStringSubmatch(path, -1) {
-				slugifiedFileName := slug.Make(loc[1])
+		if err != nil {
+			return err
+		}
 
-				if len(loc) == 4 && "" != slugifiedFileName {
-					filename := fmt.Sprintf("%s_s%02se%02s", slugifiedFileName, loc[2], loc[3])
-					newdir := fmt.Sprintf("%s/%s", dir, slugifiedFileName)
+		if extensions[filepath.Ext(path)] {
+			source := filepath.Dir(path)
+			base := filepath.Base(source)
+
+			for _, loc := range regexp.MustCompile(regex).FindAllStringSubmatch(path, -1) {
+				slugName := slug.Make(loc[1])
+				if slugName == base {
+					continue
+				}
+
+				if len(loc) == 4 && slugName != "" {
+					filename := fmt.Sprintf("%s_s%02se%02s", slugName, loc[2], loc[3])
+					newdir := filepath.Clean(fmt.Sprintf("%s/%s", dir, slugName))
 
 					if _, err := os.Stat(newdir); os.IsNotExist(err) {
-						fmt.Printf("Directory \"%s\" doesn't exists. Creating it ... \n", newdir)
 						err = os.Mkdir(newdir, os.ModePerm)
 						if err != nil {
 							log.Fatal(err)
 						}
 					}
 
-					fmt.Printf("Moving file \"%s\" ... \n", path)
-					err = os.Rename(path, fmt.Sprintf("%s/%s%s", newdir, filename, filepath.Ext(path)))
+					episode := fmt.Sprintf("%s%s", filename, filepath.Ext(path))
+					fmt.Printf("[+] %s -> %s\n", episode, newdir)
+					err = os.Rename(path, fmt.Sprintf("%s/%s", newdir, episode))
 					if err != nil {
 						log.Fatal(err)
 					}
-				} else {
-					fmt.Println(loc)
+
+					// todo: remove directory from which the media was taken if its empty
 				}
 			}
 		}
